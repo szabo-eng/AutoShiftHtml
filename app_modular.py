@@ -434,9 +434,11 @@ with st.sidebar:
             else:
                 try:
                     with st.spinner('שומר ל-Database...'):
-                        # שמירת השיבוצים
                         batch = db.batch()
                         saved_count = 0
+                        
+                        # ארגון נתונים לפי עובד
+                        employees_data = {}
                         
                         for shift_key, employee in st.session_state.final_schedule.items():
                             parts = shift_key.split('_', 3)
@@ -444,7 +446,23 @@ with st.sidebar:
                             station = parts[1]
                             shift_type = parts[2]
                             
-                            # יצירת document
+                            # אתחול עובד אם לא קיים
+                            if employee not in employees_data:
+                                employees_data[employee] = {
+                                    'shifts': [],
+                                    'total_shifts': 0
+                                }
+                            
+                            # הוסף משמרת לעובד
+                            employees_data[employee]['shifts'].append({
+                                'date': date_str,
+                                'station': station,
+                                'shift_type': shift_type,
+                                'shift_key': shift_key
+                            })
+                            employees_data[employee]['total_shifts'] += 1
+                            
+                            # שמור גם את המשמרת עצמה
                             doc_ref = db.collection('shifts').document(shift_key)
                             batch.set(doc_ref, {
                                 'date': date_str,
@@ -474,19 +492,41 @@ with st.sidebar:
                             })
                             saved_count += 1
                         
-                        # עדכון מאזן עובדים
-                        for employee, count in get_employee_counts().items():
+                        # שמירת נתוני עובדים - עם כל התאריכים
+                        for employee, data in employees_data.items():
                             doc_ref = db.collection('employee_history').document(employee)
+                            
+                            # קרא נתונים קיימים אם יש
+                            existing_doc = doc_ref.get()
+                            if existing_doc.exists:
+                                existing_data = existing_doc.to_dict()
+                                previous_total = existing_data.get('total_shifts', 0)
+                            else:
+                                previous_total = 0
+                            
+                            # עדכן עם המשמרות החדשות
                             batch.set(doc_ref, {
-                                'total_shifts': count,
-                                'last_updated': firestore.SERVER_TIMESTAMP
-                            }, merge=True)
+                                'name': employee,
+                                'shifts': data['shifts'],  # רשימת כל המשמרות
+                                'current_period_total': data['total_shifts'],  # סה"כ בתקופה הנוכחית
+                                'total_shifts': previous_total + data['total_shifts'],  # סה"כ כולל
+                                'last_updated': firestore.SERVER_TIMESTAMP,
+                                'last_shift_date': max([s['date'] for s in data['shifts']]) if data['shifts'] else None
+                            }, merge=False)  # False = החלף את הכל (לא merge)
                         
                         # ביצוע Batch
                         batch.commit()
                         
-                        st.success(f"✅ נשמרו {saved_count} משמרות ל-Database!")
-                        logger.info(f"Saved {saved_count} shifts to Firebase")
+                        st.success(f"✅ נשמרו {saved_count} משמרות + {len(employees_data)} עובדים ל-Database!")
+                        
+                        # הצג סיכום
+                        with st.expander("📊 פירוט שמירה"):
+                            for employee, data in employees_data.items():
+                                st.write(f"**{employee}**: {data['total_shifts']} משמרות")
+                                dates = [s['date'] for s in data['shifts']]
+                                st.caption(f"תאריכים: {', '.join(sorted(set(dates)))}")
+                        
+                        logger.info(f"Saved {saved_count} shifts and {len(employees_data)} employees to Firebase")
                         
                 except Exception as e:
                     st.error(f"❌ שגיאה בשמירה: {str(e)}")
