@@ -339,20 +339,25 @@ def auto_assign(dates, shi_df, req_df, balance):
     
     return temp_schedule, temp_assigned
 
-@st.dialog("שיבוץ עובד למשמרת", width="large")
+@st.dialog("שיבוץ עובד", width="large")
 def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, balance, shi_df):
-    st.markdown(f"### 📅 {get_day_name(date_str)} - {date_str}")
-    st.markdown(f"**🏢 תחנה:** {station} | **⏰ משמרת:** {shift_type}")
+    # פרטי המשמרת - קומפקטי
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"**📅 תאריך:** {date_str}")
+    with col2:
+        st.markdown(f"**🏢 תחנה:** {station}")
+    with col3:
+        st.markdown(f"**⏰ משמרת:** {shift_type}")
+    
+    st.markdown("---")
     
     if not isinstance(st.session_state.assigned_today, dict):
         st.session_state.assigned_today = {}
     
     already_working = st.session_state.assigned_today.get(date_str, set())
     
-    # כל הבקשות לאותו תאריך (לפני סינון)
-    all_requests_for_date = req_df[req_df['תאריך מבוקש'] == date_str].copy()
-    
-    # מועמדים מתאימים למשמרת הספציפית
+    # מועמדים זמינים
     candidates = req_df[
         (req_df['תאריך מבוקש'] == date_str) &
         (req_df['משמרת'] == shift_type) &
@@ -373,149 +378,58 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
         if atan_col:
             candidates = candidates[candidates[atan_col] == 'כן']
     
-    # הצגת כל הבקשות לתאריך
-    st.markdown("---")
-    st.markdown(f"### 📋 בקשות זמינות ל-{date_str}")
-    
-    if not all_requests_for_date.empty:
-        # סנן רק עובדים שעדיין לא משובצים היום
-        available_requests = all_requests_for_date[~all_requests_for_date['שם'].isin(already_working)].copy()
-        
-        if available_requests.empty:
-            st.warning("⚠️ כל העובדים שביקשו תאריך זה כבר משובצים היום")
-            st.info(f"💡 סה\"כ {len(already_working)} עובדים כבר עובדים ב-{date_str}")
-        else:
-            # הכן נתונים לתצוגה
-            display_df = available_requests.copy()
-            display_df['מאזן משמרות'] = display_df['שם'].map(lambda x: balance.get(x, 0))
-            
-            # סמן מי מתאים למשמרת הספציפית
-            display_df['התאמה'] = display_df.apply(
-                lambda row: '🎯 מתאים' if (
-                    row['משמרת'] == shift_type and 
-                    row['תחנה'] == station
-                ) else '⚪ בקשה אחרת',
-                axis=1
-            )
-            
-            # בחר עמודות להצגה
-            columns_to_show = ['שם', 'תחנה', 'משמרת', 'מאזן משמרות', 'התאמה']
-            
-            # הוסף עמודת שעות אם קיימת
-            time_cols = [c for c in display_df.columns if 'שע' in c or 'זמן' in c]
-            if time_cols:
-                columns_to_show.insert(3, time_cols[0])
-            
-            # סנן רק עמודות שקיימות
-            columns_to_show = [c for c in columns_to_show if c in display_df.columns]
-            
-            # מיין לפי התאמה ואז מאזן
-            display_df['sort_match'] = display_df['התאמה'].apply(lambda x: 0 if '🎯' in x else 1)
-            display_df = display_df.sort_values(['sort_match', 'מאזן משמרות'])
-            display_df = display_df.drop('sort_match', axis=1)
-            
-            # הצג טבלה
-            st.dataframe(
-                display_df[columns_to_show],
-                use_container_width=True,
-                hide_index=True,
-                height=300
-            )
-            
-            # סטטיסטיקה
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("סך בקשות", len(all_requests_for_date))
-            with col2:
-                st.metric("זמינים", len(available_requests))
-            with col3:
-                st.metric("משובצים", len(already_working))
-            with col4:
-                st.metric("מתאימים 🎯", len(candidates))
-            
-            # הצג עובדים משובצים בנפרד (מתקפל)
-            if len(already_working) > 0:
-                with st.expander(f"👁️ הצג {len(already_working)} עובדים שכבר משובצים היום"):
-                    assigned_requests = all_requests_for_date[all_requests_for_date['שם'].isin(already_working)].copy()
-                    
-                    # הוסף מידע על המשמרת שבה הם משובצים
-                    def get_assigned_shift(emp_name):
-                        for key, emp in st.session_state.final_schedule.items():
-                            if emp == emp_name and key.startswith(date_str):
-                                parts = key.split('_')
-                                return f"{parts[2]} @ {parts[1]}"  # משמרת @ תחנה
-                        return "לא ידוע"
-                    
-                    assigned_requests['משובץ ב'] = assigned_requests['שם'].apply(get_assigned_shift)
-                    assigned_requests['מאזן משמרות'] = assigned_requests['שם'].map(lambda x: balance.get(x, 0))
-                    
-                    display_cols = ['שם', 'משובץ ב', 'תחנה', 'משמרת', 'מאזן משמרות']
-                    display_cols = [c for c in display_cols if c in assigned_requests.columns]
-                    
-                    st.dataframe(
-                        assigned_requests[display_cols],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                    st.caption("ℹ️ עובדים אלו כבר משובצים למשמרות אחרות היום ולכן לא זמינים")
-    else:
-        st.info("אין בקשות לתאריך זה")
-    
-    st.markdown("---")
-    st.markdown(f"### 🎯 בחירת עובד למשמרת זו")
-    st.caption(f"תחנה: {station} | משמרת: {shift_type}")
-    
     if candidates.empty:
-        st.warning("😕 אין מועמדים פנויים ומתאימים למשמרת זו")
-        st.info("💡 טיפ: בדוק בטבלה למעלה מי ביקש תאריך זה")
-        if st.button("סגור", type="secondary", use_container_width=True):
+        st.warning("😕 אין עובדים זמינים למשמרת זו")
+        if st.button("סגור", use_container_width=True):
             st.rerun()
     else:
-        candidates['balance'] = candidates['שם'].map(lambda x: balance.get(x, 0))
-        candidates = candidates.sort_values('balance')
+        # הכנת נתונים
+        candidates['מאזן משמרות'] = candidates['שם'].map(lambda x: balance.get(x, 0))
+        candidates = candidates.sort_values('מאזן משמרות')
         
-        # הצג כרטיסים למועמדים
-        st.markdown("#### עובדים זמינים:")
+        # עמודות להצגה: שם, תחנה, שעות (אם יש), מאזן
+        columns_to_show = ['שם', 'תחנה']
         
-        for idx, row in candidates.iterrows():
-            employee = row['שם']
-            emp_balance = balance.get(employee, 0)
-            
-            # כרטיס עובד
-            with st.container():
-                col_info, col_btn = st.columns([3, 1])
-                
-                with col_info:
-                    st.markdown(f"""
-                    <div style="
-                        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-                        padding: 1rem;
-                        border-radius: 8px;
-                        border-right: 4px solid #0ea5e9;
-                        margin-bottom: 0.5rem;
-                    ">
-                        <div style="font-size: 1.1rem; font-weight: 700; color: #0c4a6e; margin-bottom: 0.5rem;">
-                            👤 {employee}
-                        </div>
-                        <div style="font-size: 0.9rem; color: #475569;">
-                            📊 מאזן נוכחי: <strong>{emp_balance}</strong> משמרות
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_btn:
-                    if st.button("✅ שבץ", key=f"assign_btn_{employee}_{shift_key}", type="primary", use_container_width=True):
-                        st.session_state.final_schedule[shift_key] = employee
-                        if date_str not in st.session_state.assigned_today:
-                            st.session_state.assigned_today[date_str] = set()
-                        st.session_state.assigned_today[date_str].add(employee)
-                        st.success(f"✅ {employee} שובץ/ה!")
-                        st.balloons()
-                        st.rerun()
+        # שעות - חיפוש גמיש
+        time_cols = [c for c in candidates.columns if 'שע' in c or 'זמן' in c or 'hour' in c.lower() or 'time' in c.lower()]
+        if time_cols:
+            columns_to_show.append(time_cols[0])
         
-        st.markdown("---")
-        if st.button("❌ ביטול", use_container_width=True):
-            st.rerun()
+        columns_to_show.append('מאזן משמרות')
+        
+        # סינון עמודות קיימות
+        columns_to_show = [c for c in columns_to_show if c in candidates.columns]
+        
+        # טבלת עובדים זמינים
+        st.dataframe(
+            candidates[columns_to_show],
+            use_container_width=True,
+            hide_index=True,
+            height=min(len(candidates) * 35 + 38, 250)
+        )
+        
+        st.caption(f"📊 {len(candidates)} עובדים זמינים • ממוין לפי מאזן")
+        
+        # בחירה ושיבוץ
+        selected = st.selectbox(
+            "בחר עובד:",
+            options=candidates['שם'].tolist(),
+            format_func=lambda x: f"👤 {x} (מאזן: {balance.get(x, 0)})",
+            label_visibility="collapsed"
+        )
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if st.button("✅ שבץ עובד", type="primary", use_container_width=True):
+                st.session_state.final_schedule[shift_key] = selected
+                if date_str not in st.session_state.assigned_today:
+                    st.session_state.assigned_today[date_str] = set()
+                st.session_state.assigned_today[date_str].add(selected)
+                st.success(f"✅ {selected} שובץ/ה!")
+                st.rerun()
+        with col2:
+            if st.button("❌ ביטול", use_container_width=True):
+                st.rerun()
 
 # Session State
 if 'final_schedule' not in st.session_state:
