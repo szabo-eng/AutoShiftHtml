@@ -302,6 +302,13 @@ def get_balance():
         pass
     return scores
 
+def get_employee_counts():
+    """ספירת משמרות לכל עובד מהשיבוצים הנוכחיים"""
+    counts = {}
+    for shift_key, employee in st.session_state.final_schedule.items():
+        counts[employee] = counts.get(employee, 0) + 1
+    return counts
+
 def auto_assign(dates, shi_df, req_df, balance):
     temp_schedule, temp_assigned = {}, {d: set() for d in dates}
     running_balance = balance.copy()
@@ -401,6 +408,14 @@ if 'cancelled_shifts' not in st.session_state:
 with st.sidebar:
     st.markdown("# ⚙️ ניהול מערכת")
     
+    # אינדיקטור חיבור Firebase
+    if db:
+        st.success("🟢 Database מחובר")
+    else:
+        st.warning("🟡 Database לא זמין")
+    
+    st.divider()
+    
     st.markdown("### 📁 קבצים")
     req_file = st.file_uploader("בקשות עובדים", type=['csv'])
     shi_file = st.file_uploader("תבנית משמרות", type=['csv'])
@@ -411,10 +426,113 @@ with st.sidebar:
         if st.button("🪄 שיבוץ אוטומטי", type="primary", use_container_width=True):
             st.session_state.trigger_auto = True
             st.rerun()
+        
+        if st.button("📥 טען מ-Database", use_container_width=True):
+            if not db:
+                st.error("❌ Database לא זמין")
+            else:
+                try:
+                    with st.spinner('טוען מ-Database...'):
+                        shifts_ref = db.collection('shifts')
+                        docs = shifts_ref.stream()
+                        
+                        loaded_schedule = {}
+                        loaded_cancelled = set()
+                        loaded_assigned = {}
+                        
+                        for doc in docs:
+                            data = doc.to_dict()
+                            shift_key = doc.id
+                            
+                            if data.get('status') == 'cancelled':
+                                loaded_cancelled.add(shift_key)
+                            elif data.get('status') == 'assigned' and data.get('employee'):
+                                employee = data['employee']
+                                loaded_schedule[shift_key] = employee
+                                
+                                # עדכון assigned_today
+                                date = data.get('date')
+                                if date:
+                                    if date not in loaded_assigned:
+                                        loaded_assigned[date] = set()
+                                    loaded_assigned[date].add(employee)
+                        
+                        # עדכון Session State
+                        st.session_state.final_schedule = loaded_schedule
+                        st.session_state.cancelled_shifts = loaded_cancelled
+                        st.session_state.assigned_today = loaded_assigned
+                        
+                        st.success(f"✅ נטענו {len(loaded_schedule)} שיבוצים מ-Database!")
+                        st.rerun()
+                        
+                except Exception as e:
+                    st.error(f"❌ שגיאה בטעינה: {str(e)}")
+                    logger.error(f"Load error: {e}", exc_info=True)
     
     if st.session_state.final_schedule:
-        if st.button("💾 שמירה", type="primary", use_container_width=True):
-            st.success("✅ נשמר!")
+        if st.button("💾 שמירה ל-Database", type="primary", use_container_width=True):
+            if not db:
+                st.error("❌ Database לא זמין - ודא שהגדרת Firebase secrets")
+            else:
+                try:
+                    with st.spinner('שומר ל-Database...'):
+                        # שמירת השיבוצים
+                        batch = db.batch()
+                        saved_count = 0
+                        
+                        for shift_key, employee in st.session_state.final_schedule.items():
+                            parts = shift_key.split('_', 3)
+                            date_str = parts[0]
+                            station = parts[1]
+                            shift_type = parts[2]
+                            
+                            # יצירת document
+                            doc_ref = db.collection('shifts').document(shift_key)
+                            batch.set(doc_ref, {
+                                'date': date_str,
+                                'station': station,
+                                'shift_type': shift_type,
+                                'employee': employee,
+                                'timestamp': firestore.SERVER_TIMESTAMP,
+                                'status': 'assigned'
+                            })
+                            saved_count += 1
+                        
+                        # שמירת משמרות מבוטלות
+                        for shift_key in st.session_state.cancelled_shifts:
+                            parts = shift_key.split('_', 3)
+                            date_str = parts[0]
+                            station = parts[1]
+                            shift_type = parts[2]
+                            
+                            doc_ref = db.collection('shifts').document(shift_key)
+                            batch.set(doc_ref, {
+                                'date': date_str,
+                                'station': station,
+                                'shift_type': shift_type,
+                                'employee': None,
+                                'timestamp': firestore.SERVER_TIMESTAMP,
+                                'status': 'cancelled'
+                            })
+                            saved_count += 1
+                        
+                        # עדכון מאזן עובדים
+                        for employee, count in get_employee_counts().items():
+                            doc_ref = db.collection('employee_history').document(employee)
+                            batch.set(doc_ref, {
+                                'total_shifts': count,
+                                'last_updated': firestore.SERVER_TIMESTAMP
+                            }, merge=True)
+                        
+                        # ביצוע Batch
+                        batch.commit()
+                        
+                        st.success(f"✅ נשמרו {saved_count} משמרות ל-Database!")
+                        logger.info(f"Saved {saved_count} shifts to Firebase")
+                        
+                except Exception as e:
+                    st.error(f"❌ שגיאה בשמירה: {str(e)}")
+                    logger.error(f"Save error: {e}", exc_info=True)
         
         if st.button("📥 ייצוא", use_container_width=True):
             export_data = []
