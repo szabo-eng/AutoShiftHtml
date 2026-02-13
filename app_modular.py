@@ -616,7 +616,106 @@ if req_file and shi_file:
                 temp_schedule, temp_assigned = auto_assign(dates, shi_df, req_df, balance)
                 st.session_state.final_schedule, st.session_state.assigned_today = temp_schedule, temp_assigned
                 st.session_state.trigger_auto = False
-            st.success(f"✅ {len(st.session_state.final_schedule)} משמרות שובצו")
+            
+            # חישוב סטטיסטיקות
+            total_shifts = len(shi_df) * len(dates)
+            assigned_count = len(st.session_state.final_schedule)
+            cancelled_count = len(st.session_state.cancelled_shifts)
+            missing_count = total_shifts - assigned_count - cancelled_count
+            
+            st.success(f"✅ שיבוץ אוטומטי הושלם: {assigned_count} משמרות שובצו מתוך {total_shifts}")
+            
+            # דוח חוסרים
+            if missing_count > 0:
+                st.warning(f"⚠️ {missing_count} משמרות ללא שיבוץ")
+                
+                with st.expander(f"📋 דוח חוסרים - {missing_count} משמרות", expanded=True):
+                    # בניית רשימת חוסרים
+                    missing_shifts = []
+                    
+                    for date_str in dates:
+                        for idx, shift_row in shi_df.iterrows():
+                            shift_key = f"{date_str}_{shift_row['תחנה']}_{shift_row['משמרת']}_{idx}"
+                            
+                            # בדוק אם המשמרת לא שובצה ולא מבוטלת
+                            if shift_key not in st.session_state.final_schedule and shift_key not in st.session_state.cancelled_shifts:
+                                # בדוק למה לא שובצה
+                                potential = req_df[
+                                    (req_df['תאריך מבוקש'] == date_str) &
+                                    (req_df['משמרת'] == shift_row['משמרת']) &
+                                    (req_df['תחנה'] == shift_row['תחנה'])
+                                ].copy()
+                                
+                                # סיבה
+                                if potential.empty:
+                                    reason = "אין בקשות"
+                                else:
+                                    already_working = st.session_state.assigned_today.get(date_str, set())
+                                    available = potential[~potential['שם'].isin(already_working)]
+                                    
+                                    if available.empty:
+                                        reason = f"כל המבקשים משובצים ({len(potential)} מבקשים)"
+                                    else:
+                                        # בדוק אט"ן
+                                        if "אט" in str(shift_row['סוג תקן']):
+                                            atan_col = get_atan_column(req_df)
+                                            if atan_col:
+                                                atan_available = available[available[atan_col] == 'כן']
+                                                if atan_available.empty:
+                                                    reason = f"אין מורשי אט\"ן זמינים ({len(available)} פנויים)"
+                                                else:
+                                                    reason = "לא ידוע"
+                                            else:
+                                                reason = "אין עמודת אט\"ן"
+                                        else:
+                                            reason = "לא ידוע"
+                                
+                                missing_shifts.append({
+                                    'תאריך': date_str,
+                                    'יום': get_day_name(date_str),
+                                    'תחנה': shift_row['תחנה'],
+                                    'משמרת': shift_row['משמרת'],
+                                    'סוג תקן': shift_row['סוג תקן'],
+                                    'סיבה': reason
+                                })
+                    
+                    if missing_shifts:
+                        # המר לטבלה
+                        missing_df = pd.DataFrame(missing_shifts)
+                        
+                        # הצג טבלה
+                        st.dataframe(
+                            missing_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(len(missing_df) * 35 + 38, 400)
+                        )
+                        
+                        # סטטיסטיקה לפי סיבה
+                        st.markdown("#### 📊 פירוט לפי סיבה:")
+                        reason_counts = missing_df['סיבה'].value_counts()
+                        
+                        cols = st.columns(min(len(reason_counts), 4))
+                        for i, (reason, count) in enumerate(reason_counts.items()):
+                            with cols[i % len(cols)]:
+                                st.metric(reason, count)
+                        
+                        # כפתור ייצוא דוח חוסרים
+                        st.markdown("---")
+                        csv_missing = missing_df.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            label="📥 ייצא דוח חוסרים",
+                            data=csv_missing,
+                            file_name=f"missing_shifts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                        
+                        st.info("💡 ניתן לשבץ ידנית את המשמרות החסרות על ידי לחיצה על כפתור ➕ שבץ")
+            else:
+                st.balloons()
+                st.success("🎉 כל המשמרות שובצו בהצלחה!")
+            
             st.rerun()
         
         # מדדים
