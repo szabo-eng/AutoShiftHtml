@@ -357,13 +357,15 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
     
     already_working = st.session_state.assigned_today.get(date_str, set())
     
-    # מועמדים זמינים
-    candidates = req_df[
+    # כל העובדים שביקשו את אותו תאריך ואותה משמרת (ללא קשר לתחנה)
+    all_candidates = req_df[
         (req_df['תאריך מבוקש'] == date_str) &
         (req_df['משמרת'] == shift_type) &
-        (req_df['תחנה'] == station) &
-        (~req_df['שם'].isin(already_working))
+        (~req_df['שם'].isin(already_working))  # סנן משובצים
     ].copy()
+    
+    # הסר כפילויות - עובד שביקש כמה תחנות באותו יום/משמרת
+    all_candidates = all_candidates.drop_duplicates(subset=['שם'], keep='first')
     
     # בדיקת אטן
     shift_row = None
@@ -373,53 +375,120 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
             shift_row = s
             break
     
+    # סינון אט"ן אם נדרש
+    is_atan_shift = False
     if shift_row is not None and "אט" in str(shift_row['סוג תקן']):
+        is_atan_shift = True
         atan_col = get_atan_column(req_df)
         if atan_col:
-            candidates = candidates[candidates[atan_col] == 'כן']
+            # שמור את כולם אבל סמן מי מורשה
+            all_candidates['מורשה אטן'] = all_candidates[atan_col].apply(
+                lambda x: '✅' if str(x).strip() == 'כן' else '❌'
+            )
     
-    if candidates.empty:
-        st.warning("😕 אין עובדים זמינים למשמרת זו")
+    if all_candidates.empty:
+        st.warning(f"😕 אין עובדים שביקשו {shift_type} ב-{date_str}")
+        st.info(f"💡 {len(already_working)} עובדים כבר משובצים ביום זה")
         if st.button("סגור", use_container_width=True):
             st.rerun()
     else:
-        # הכנת נתונים
-        candidates['מאזן משמרות'] = candidates['שם'].map(lambda x: balance.get(x, 0))
-        candidates = candidates.sort_values('מאזן משמרות')
+        # הכנת נתונים לתצוגה
+        all_candidates['מאזן משמרות'] = all_candidates['שם'].map(lambda x: balance.get(x, 0))
         
-        # עמודות להצגה: שם, תחנה, שעות (אם יש), מאזן
-        columns_to_show = ['שם', 'תחנה']
-        
-        # שעות - חיפוש גמיש
-        time_cols = [c for c in candidates.columns if 'שע' in c or 'זמן' in c or 'hour' in c.lower() or 'time' in c.lower()]
-        if time_cols:
-            columns_to_show.append(time_cols[0])
-        
-        columns_to_show.append('מאזן משמרות')
-        
-        # סינון עמודות קיימות
-        columns_to_show = [c for c in columns_to_show if c in candidates.columns]
-        
-        # טבלת עובדים זמינים
-        st.dataframe(
-            candidates[columns_to_show],
-            use_container_width=True,
-            hide_index=True,
-            height=min(len(candidates) * 35 + 38, 250)
+        # סמן האם התחנה מתאימה
+        all_candidates['תחנה מבוקשת'] = all_candidates['תחנה']
+        all_candidates['התאמה'] = all_candidates['תחנה'].apply(
+            lambda x: '🎯 תחנה מתאימה' if x == station else '⚪ תחנה אחרת'
         )
         
-        st.caption(f"📊 {len(candidates)} עובדים זמינים • ממוין לפי מאזן")
+        # מיון: קודם מתאימים, אחר כך לפי מאזן
+        all_candidates['sort_match'] = all_candidates['תחנה'].apply(lambda x: 0 if x == station else 1)
+        all_candidates = all_candidates.sort_values(['sort_match', 'מאזן משמרות'])
+        
+        # עמודות להצגה
+        columns_to_show = ['שם', 'תחנה מבוקשת', 'מאזן משמרות', 'התאמה']
+        
+        # הוסף עמודת שעות אם קיימת
+        time_cols = [c for c in all_candidates.columns if 'שע' in c or 'זמן' in c or 'hour' in c.lower() or 'time' in c.lower()]
+        if time_cols:
+            columns_to_show.insert(2, time_cols[0])
+        
+        # הוסף עמודת אט"ן אם רלוונטי
+        if is_atan_shift and 'מורשה אטן' in all_candidates.columns:
+            columns_to_show.insert(2, 'מורשה אטן')
+        
+        # סינון עמודות קיימות
+        columns_to_show = [c for c in columns_to_show if c in all_candidates.columns]
+        
+        # הצג כותרת
+        if is_atan_shift:
+            st.info("ℹ️ משמרת אט\"ן - רק עובדים מורשים יכולים להישבץ")
+        
+        # טבלת עובדים
+        st.dataframe(
+            all_candidates[columns_to_show],
+            use_container_width=True,
+            hide_index=True,
+            height=min(len(all_candidates) * 35 + 38, 300)
+        )
+        
+        # סטטיסטיקה
+        matching_station = len(all_candidates[all_candidates['תחנה מבוקשת'] == station])
+        other_station = len(all_candidates) - matching_station
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("סה\"כ זמינים", len(all_candidates))
+        with col2:
+            st.metric("🎯 תחנה מתאימה", matching_station)
+        with col3:
+            st.metric("⚪ תחנה אחרת", other_station)
+        
+        st.caption("📊 עובדים ממוינים: קודם תחנה מתאימה, אחר כך לפי מאזן")
         
         st.markdown("---")
         
         # בחירת עובד עם radio buttons
-        selected = st.radio(
-            "בחר עובד לשיבוץ:",
-            options=candidates['שם'].tolist(),
-            format_func=lambda x: f"👤 {x} • מאזן: {balance.get(x, 0)} משמרות",
-            key=f"radio_{shift_key}",
-            label_visibility="visible"
-        )
+        # סינון לפי אט"ן אם נדרש
+        selectable_candidates = all_candidates.copy()
+        if is_atan_shift and 'מורשה אטן' in all_candidates.columns:
+            authorized = selectable_candidates[selectable_candidates['מורשה אטן'] == '✅']
+            unauthorized = selectable_candidates[selectable_candidates['מורשה אטן'] == '❌']
+            
+            if not authorized.empty:
+                st.markdown("### ✅ עובדים מורשים לאט\"ן:")
+                selected = st.radio(
+                    "בחר עובד מורשה:",
+                    options=authorized['שם'].tolist(),
+                    format_func=lambda x: f"👤 {x} • תחנה: {all_candidates[all_candidates['שם']==x]['תחנה מבוקשת'].values[0]} • מאזן: {balance.get(x, 0)}",
+                    key=f"radio_auth_{shift_key}",
+                    label_visibility="collapsed"
+                )
+                
+                if not unauthorized.empty:
+                    with st.expander(f"⚠️ {len(unauthorized)} עובדים ללא הרשאת אט\"ן (לא מומלץ)"):
+                        st.caption("עובדים אלו ביקשו את המשמרת אך אינם מורשים לאט\"ן")
+                        for name in unauthorized['שם'].tolist():
+                            st.write(f"• {name} (תחנה: {all_candidates[all_candidates['שם']==name]['תחנה מבוקשת'].values[0]})")
+            else:
+                st.warning("⚠️ אין עובדים מורשים לאט\"ן זמינים")
+                st.markdown("### עובדים ללא הרשאה:")
+                selected = st.radio(
+                    "בחר עובד (ללא הרשאת אט\"ן):",
+                    options=selectable_candidates['שם'].tolist(),
+                    format_func=lambda x: f"👤 {x} • תחנה: {all_candidates[all_candidates['שם']==x]['תחנה מבוקשת'].values[0]} • מאזן: {balance.get(x, 0)}",
+                    key=f"radio_{shift_key}",
+                    label_visibility="collapsed"
+                )
+        else:
+            # משמרת רגילה
+            selected = st.radio(
+                "בחר עובד לשיבוץ:",
+                options=selectable_candidates['שם'].tolist(),
+                format_func=lambda x: f"👤 {x} • תחנה: {all_candidates[all_candidates['שם']==x]['תחנה מבוקשת'].values[0]} • מאזן: {balance.get(x, 0)}",
+                key=f"radio_{shift_key}",
+                label_visibility="visible"
+            )
         
         # כפתורי פעולה
         col1, col2 = st.columns([3, 1])
@@ -429,6 +498,12 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
                 if date_str not in st.session_state.assigned_today:
                     st.session_state.assigned_today[date_str] = set()
                 st.session_state.assigned_today[date_str].add(selected)
+                
+                # בדוק אם שובץ לתחנה אחרת
+                selected_station = all_candidates[all_candidates['שם'] == selected]['תחנה מבוקשת'].values[0]
+                if selected_station != station:
+                    st.info(f"ℹ️ {selected} ביקש/ה תחנה {selected_station} אך שובץ/ה לתחנה {station}")
+                
                 st.success(f"✅ {selected} שובץ/ה!")
                 st.rerun()
         with col2:
