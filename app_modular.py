@@ -410,14 +410,18 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
         
         st.caption(f"📊 {len(candidates)} עובדים זמינים • ממוין לפי מאזן")
         
-        # בחירה ושיבוץ
-        selected = st.selectbox(
-            "בחר עובד:",
+        st.markdown("---")
+        
+        # בחירת עובד עם radio buttons
+        selected = st.radio(
+            "בחר עובד לשיבוץ:",
             options=candidates['שם'].tolist(),
-            format_func=lambda x: f"👤 {x} (מאזן: {balance.get(x, 0)})",
-            label_visibility="collapsed"
+            format_func=lambda x: f"👤 {x} • מאזן: {balance.get(x, 0)} משמרות",
+            key=f"radio_{shift_key}",
+            label_visibility="visible"
         )
         
+        # כפתורי פעולה
         col1, col2 = st.columns([3, 1])
         with col1:
             if st.button("✅ שבץ עובד", type="primary", use_container_width=True):
