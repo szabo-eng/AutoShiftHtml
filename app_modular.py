@@ -52,25 +52,66 @@ st.markdown("""
     --gray: #95a5a6;
 }
 
+/* RTL for entire app */
 * {
     font-family: 'Heebo', sans-serif;
 }
 
-.main {
-    direction: rtl;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+html, body, [class*="css"] {
+    direction: rtl !important;
+    text-align: right !important;
 }
 
+/* Fix Streamlit elements */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div > div,
+.stMultiSelect > div > div > div,
+.stTextArea > div > div > textarea {
+    direction: rtl !important;
+    text-align: right !important;
+}
+
+/* Fix dataframes */
+.dataframe {
+    direction: rtl !important;
+}
+
+.dataframe th {
+    text-align: right !important;
+}
+
+.dataframe td {
+    text-align: right !important;
+}
+
+/* Fix buttons */
 .stButton > button {
     width: 100%;
     border-radius: 8px;
     font-weight: 600;
     transition: all 0.3s;
+    direction: rtl !important;
 }
 
 .stButton > button:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Fix file uploader */
+.stFileUploader {
+    direction: rtl !important;
+}
+
+/* Fix sidebar */
+.css-1d391kg, [data-testid="stSidebar"] {
+    direction: rtl !important;
+}
+
+.main {
+    direction: rtl !important;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
 }
 
 .day-header {
@@ -103,6 +144,8 @@ st.markdown("""
     border-right: 4px solid var(--primary);
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     transition: all 0.3s;
+    direction: rtl;
+    text-align: right;
 }
 
 .shift-card:hover {
@@ -171,6 +214,21 @@ st.markdown("""
 .status-cancelled {
     background: var(--gray);
     color: white;
+}
+
+/* Fix radio buttons */
+.stRadio > div {
+    direction: rtl !important;
+}
+
+/* Fix checkboxes */
+.stCheckbox {
+    direction: rtl !important;
+}
+
+/* Fix metrics */
+[data-testid="stMetricValue"] {
+    direction: ltr !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -628,6 +686,93 @@ with st.sidebar:
                         with st.expander("📊 פירוט"):
                             for employee, data in employees_data.items():
                                 st.write(f"**{employee}**: {data['total_shifts']} משמרות")
+                
+                except Exception as e:
+                    st.error(f"❌ שגיאה: {str(e)}")
+    
+    # ייצוא מ-Database
+    if db:
+        st.divider()
+        st.markdown("### 📥 ייצוא מ-Database")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📥 ייצא משמרות", use_container_width=True):
+                try:
+                    with st.spinner('מייצא מ-Database...'):
+                        # קרא את כל המשמרות
+                        shifts_ref = db.collection('shifts')
+                        docs = shifts_ref.stream()
+                        
+                        shifts_data = []
+                        for doc in docs:
+                            data = doc.to_dict()
+                            shifts_data.append({
+                                'shift_key': doc.id,
+                                'תאריך': data.get('date', ''),
+                                'תחנה': data.get('station', ''),
+                                'משמרת': data.get('shift_type', ''),
+                                'עובד': data.get('employee', ''),
+                                'סטטוס': data.get('status', ''),
+                                'זמן שמירה': str(data.get('timestamp', ''))
+                            })
+                        
+                        if shifts_data:
+                            shifts_df = pd.DataFrame(shifts_data)
+                            shifts_df['תאריך_sort'] = shifts_df['תאריך'].apply(parse_date_safe)
+                            shifts_df = shifts_df.sort_values(['תאריך_sort', 'תחנה'])
+                            shifts_df = shifts_df.drop(['shift_key', 'תאריך_sort'], axis=1)
+                            
+                            csv = shifts_df.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                "⬇️ הורד משמרות",
+                                csv,
+                                f"db_shifts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                            st.info(f"📊 {len(shifts_data)} משמרות ב-Database")
+                        else:
+                            st.warning("אין משמרות ב-Database")
+                
+                except Exception as e:
+                    st.error(f"❌ שגיאה: {str(e)}")
+        
+        with col2:
+            if st.button("📥 ייצא עובדים", use_container_width=True):
+                try:
+                    with st.spinner('מייצא מ-Database...'):
+                        # קרא את כל העובדים
+                        employees_ref = db.collection('employee_history')
+                        docs = employees_ref.stream()
+                        
+                        employees_data = []
+                        for doc in docs:
+                            data = doc.to_dict()
+                            employees_data.append({
+                                'שם': data.get('name', ''),
+                                'סה"כ משמרות נוכחי': data.get('current_period_total', 0),
+                                'סה"כ משמרות מצטבר': data.get('total_shifts', 0),
+                                'משמרת אחרונה': data.get('last_shift_date', ''),
+                                'עדכון אחרון': str(data.get('last_updated', ''))
+                            })
+                        
+                        if employees_data:
+                            employees_df = pd.DataFrame(employees_data)
+                            employees_df = employees_df.sort_values('סה"כ משמרות מצטבר', ascending=False)
+                            
+                            csv = employees_df.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                "⬇️ הורד עובדים",
+                                csv,
+                                f"db_employees_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                            st.info(f"👥 {len(employees_data)} עובדים ב-Database")
+                        else:
+                            st.warning("אין עובדים ב-Database")
                 
                 except Exception as e:
                     st.error(f"❌ שגיאה: {str(e)}")
