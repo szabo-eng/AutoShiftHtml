@@ -280,25 +280,25 @@ def get_week_start(date_str):
     return date_str
 
 def validate_dataframes(req_df, shi_df):
-    """בדיקת תקינות קבצים"""
+    """בדיקת תקינות קבצים - רק בדיקת קיום עמודות, לא סדר"""
     errors = []
     
-    # בדיקת קובץ בקשות
-    if set(REQUIRED_REQUEST_COLUMNS) - set(req_df.columns):
-        missing = set(REQUIRED_REQUEST_COLUMNS) - set(req_df.columns)
-        errors.append(f"❌ עמודות חסרות בקובץ בקשות: {', '.join(missing)}")
+    # בדיקת קובץ בקשות - רק שהעמודות קיימות
+    missing_req = set(REQUIRED_REQUEST_COLUMNS) - set(req_df.columns)
+    if missing_req:
+        errors.append(f"❌ עמודות חסרות בקובץ בקשות: {', '.join(missing_req)}")
     
-    # בדיקת קובץ משמרות
-    if set(REQUIRED_SHIFT_COLUMNS) - set(shi_df.columns):
-        missing = set(REQUIRED_SHIFT_COLUMNS) - set(shi_df.columns)
-        errors.append(f"❌ עמודות חסרות בתבנית משמרות: {', '.join(missing)}")
+    # בדיקת קובץ משמרות - רק שהעמודות קיימות
+    missing_shi = set(REQUIRED_SHIFT_COLUMNS) - set(shi_df.columns)
+    if missing_shi:
+        errors.append(f"❌ עמודות חסרות בתבנית משמרות: {', '.join(missing_shi)}")
     
     return errors
 
 def get_atan_column(df):
     """מציאת עמודת אט"ן - תומך בשמות שונים"""
     # רשימת שמות אפשריים
-    possible_names = ['אטן', 'אט"ן', 'אט״ן', 'אטען', 'atan']
+    possible_names = ['אטן', 'אט"ן', 'אט״ן', 'אטען', 'atan', 'מורשה']
     
     for col in df.columns:
         col_lower = col.lower().strip()
@@ -813,13 +813,64 @@ st.title("📅 לוח שיבוצים")
 
 if req_file and shi_file:
     try:
-        # קרא קבצים עם טיפול בגרשיים
+        # קרא קבצים עם טיפול בגרשיים ו-BOM
         req_df = pd.read_csv(req_file, encoding='utf-8-sig', quotechar='"', doublequote=True)
         shi_df = pd.read_csv(shi_file, encoding='utf-8-sig', quotechar='"', doublequote=True)
         
         # נקה רווחים מיותרים משמות עמודות
         req_df.columns = req_df.columns.str.strip()
         shi_df.columns = shi_df.columns.str.strip()
+        
+        # רשום תיקונים שבוצעו
+        corrections = []
+        
+        # נקה רווחים מתוכן השעות (אם קיים)
+        for df_name, df in [('בקשות', req_df), ('משמרות', shi_df)]:
+            time_cols = [c for c in df.columns if 'שע' in c or 'זמן' in c or 'hour' in c.lower()]
+            for col in time_cols:
+                if col in df.columns:
+                    # בדוק אם יש רווחים
+                    has_spaces = df[col].astype(str).str.contains(' ').any()
+                    df[col] = df[col].astype(str).str.replace(' ', '')
+                    if has_spaces:
+                        corrections.append(f"נוקו רווחים מעמודת שעות בקובץ {df_name}")
+        
+        # תקן פורמט שעות הפוך (23:00-15:00 -> 15:00-23:00)
+        for df_name, df in [('בקשות', req_df), ('משמרות', shi_df)]:
+            time_cols = [c for c in df.columns if 'שע' in c or 'זמן' in c or 'hour' in c.lower()]
+            for col in time_cols:
+                if col in df.columns:
+                    # תקן שעות שמתחילות בשעה גבוהה ומסתיימות בנמוכה
+                    fixed_count = 0
+                    def fix_time_format(time_str):
+                        nonlocal fixed_count
+                        if pd.isna(time_str) or str(time_str).strip() == '' or str(time_str) == 'nan':
+                            return time_str
+                        time_str = str(time_str).strip()
+                        if '-' in time_str:
+                            parts = time_str.split('-')
+                            if len(parts) == 2:
+                                start, end = parts[0].strip(), parts[1].strip()
+                                # אם השעה מתחילה אחרי שהיא מסתיימת, החלף
+                                try:
+                                    start_hour = int(start.split(':')[0])
+                                    end_hour = int(end.split(':')[0])
+                                    if start_hour > end_hour:
+                                        fixed_count += 1
+                                        return f"{end}-{start}"
+                                except:
+                                    pass
+                        return time_str
+                    
+                    df[col] = df[col].apply(fix_time_format)
+                    if fixed_count > 0:
+                        corrections.append(f"תוקנו {fixed_count} שעות הפוכות בקובץ {df_name}")
+        
+        # הצג הודעות תיקון
+        if corrections:
+            with st.expander("🔧 תיקונים אוטומטיים שבוצעו"):
+                for correction in corrections:
+                    st.info(f"✓ {correction}")
         
         errors = validate_dataframes(req_df, shi_df)
         if errors:
@@ -828,16 +879,27 @@ if req_file and shi_file:
             st.stop()
         
         # הצג מידע על הקבצים
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.success(f"✅ {len(req_df)} בקשות")
         with col2:
             st.success(f"✅ {len(shi_df)} משמרות")
         with col3:
             st.success(f"✅ {len(req_df['שם'].unique())} עובדים")
+        with col4:
+            atan_col = get_atan_column(req_df)
+            if atan_col:
+                atan_count = len(req_df[req_df[atan_col] == 'כן'])
+                st.success(f"✅ {atan_count} מורשי אט\"ן")
+            else:
+                st.info("ℹ️ אין עמודת אט\"ן")
         
         dates = sorted(req_df['תאריך מבוקש'].unique(), key=parse_date_safe)
         balance = get_balance()
+        
+        # הצג טווח תאריכים
+        if dates:
+            st.info(f"📅 תאריכים: {dates[0]} עד {dates[-1]} ({len(dates)} ימים)")
         
         # ייצוא
         if st.session_state.final_schedule:
