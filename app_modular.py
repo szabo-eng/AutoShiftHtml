@@ -841,9 +841,7 @@ if req_file and shi_file:
             for col in time_cols:
                 if col in df.columns:
                     # תקן שעות שמתחילות בשעה גבוהה ומסתיימות בנמוכה
-                    fixed_count = 0
                     def fix_time_format(time_str):
-                        nonlocal fixed_count
                         if pd.isna(time_str) or str(time_str).strip() == '' or str(time_str) == 'nan':
                             return time_str
                         time_str = str(time_str).strip()
@@ -856,13 +854,16 @@ if req_file and shi_file:
                                     start_hour = int(start.split(':')[0])
                                     end_hour = int(end.split(':')[0])
                                     if start_hour > end_hour:
-                                        fixed_count += 1
                                         return f"{end}-{start}"
                                 except:
                                     pass
                         return time_str
                     
+                    # החל את התיקון וספור כמה תוקנו
+                    original_values = df[col].copy()
                     df[col] = df[col].apply(fix_time_format)
+                    fixed_count = (original_values != df[col]).sum()
+                    
                     if fixed_count > 0:
                         corrections.append(f"תוקנו {fixed_count} שעות הפוכות בקובץ {df_name}")
         
