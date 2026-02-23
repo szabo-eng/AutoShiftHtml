@@ -170,6 +170,46 @@ html, body, [class*="css"] {
     opacity: 0.7;
 }
 
+/* צבעים לפי סוג משמרת */
+.shift-card.morning {
+    background: linear-gradient(to left, #ffffff, #ffe5cc) !important;
+    border-right-color: #ff8c00 !important;
+}
+
+.shift-card.evening {
+    background: linear-gradient(to left, #ffffff, #d4edda) !important;
+    border-right-color: #28a745 !important;
+}
+
+.shift-card.night {
+    background: linear-gradient(to left, #ffffff, #d1e7ff) !important;
+    border-right-color: #0066cc !important;
+}
+
+.shift-card.morning.assigned {
+    background: linear-gradient(to left, #fff5e6, #ffcc99) !important;
+}
+
+.shift-card.evening.assigned {
+    background: linear-gradient(to left, #e8f5e9, #a5d6a7) !important;
+}
+
+.shift-card.night.assigned {
+    background: linear-gradient(to left, #e6f2ff, #99c2ff) !important;
+}
+
+.shift-card.morning.empty {
+    background: linear-gradient(to left, #fff8f0, #ffd9b3) !important;
+}
+
+.shift-card.evening.empty {
+    background: linear-gradient(to left, #f1f8f4, #b8e0c0) !important;
+}
+
+.shift-card.night.empty {
+    background: linear-gradient(to left, #f0f7ff, #b3d9ff) !important;
+}
+
 .shift-header {
     display: flex;
     justify-content: space-between;
@@ -1044,6 +1084,25 @@ if req_file and shi_file:
         st.markdown("---")
         
         # לוח שיבוץ
+        
+        # אגדת צבעים
+        st.markdown("""
+        <div style="display: flex; justify-content: center; gap: 2rem; margin-bottom: 1rem; padding: 0.75rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="width: 20px; height: 20px; background: linear-gradient(to left, #ffffff, #ffe5cc); border: 2px solid #ff8c00; border-radius: 4px;"></div>
+                <span style="font-weight: 600;">🌅 בוקר</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="width: 20px; height: 20px; background: linear-gradient(to left, #ffffff, #d4edda); border: 2px solid #28a745; border-radius: 4px;"></div>
+                <span style="font-weight: 600;">🌆 ערב</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="width: 20px; height: 20px; background: linear-gradient(to left, #ffffff, #d1e7ff); border: 2px solid #0066cc; border-radius: 4px;"></div>
+                <span style="font-weight: 600;">🌙 לילה</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
         header_cols = st.columns(7)
         for i, d in enumerate(dates[:7]):
             with header_cols[i]:
@@ -1061,9 +1120,19 @@ if req_file and shi_file:
                     with cols[i]:
                         shift_key = f"{date_str}_{shift_row['תחנה']}_{shift_row['משמרת']}_{idx}"
                         
+                        # קבע צבע לפי סוג משמרת
+                        shift_type_class = ""
+                        shift_name = str(shift_row['משמרת']).lower()
+                        if 'בוקר' in shift_name:
+                            shift_type_class = "morning"
+                        elif 'ערב' in shift_name:
+                            shift_type_class = "evening"
+                        elif 'לילה' in shift_name:
+                            shift_type_class = "night"
+                        
                         if shift_key in st.session_state.cancelled_shifts:
                             st.markdown(f'''
-                            <div class="shift-card cancelled">
+                            <div class="shift-card cancelled {shift_type_class}">
                                 <div class="shift-header">
                                     <span class="shift-title">{shift_row['משמרת']}</span>
                                     <span class="status-badge status-cancelled">מבוטל</span>
@@ -1079,7 +1148,7 @@ if req_file and shi_file:
                         elif shift_key in st.session_state.final_schedule:
                             employee = st.session_state.final_schedule[shift_key]
                             st.markdown(f'''
-                            <div class="shift-card assigned">
+                            <div class="shift-card assigned {shift_type_class}">
                                 <div class="shift-header">
                                     <span class="shift-title">{shift_row['משמרת']}</span>
                                     <span class="status-badge status-assigned">✓</span>
@@ -1103,7 +1172,7 @@ if req_file and shi_file:
                         
                         else:
                             st.markdown(f'''
-                            <div class="shift-card empty">
+                            <div class="shift-card empty {shift_type_class}">
                                 <div class="shift-header">
                                     <span class="shift-title">{shift_row['משמרת']}</span>
                                     <span class="status-badge status-empty">ריק</span>
