@@ -550,7 +550,7 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
     
     if all_candidates.empty:
         st.warning(f"😕 אין עובדים שביקשו {shift_type} ב-{date_str}")
-        if st.button("סגור", use_container_width=True):
+        if st.button("סגור", width="stretch"):
             st.rerun()
     else:
         # הכנת נתונים
@@ -582,7 +582,7 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
         # טבלה
         st.dataframe(
             all_candidates[columns_to_show],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=min(len(all_candidates) * 35 + 38, 300)
         )
@@ -639,7 +639,7 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
         # כפתורים
         col1, col2 = st.columns([3, 1])
         with col1:
-            if st.button("✅ שבץ עובד", type="primary", use_container_width=True):
+            if st.button("✅ שבץ עובד", type="primary", width="stretch"):
                 st.session_state.final_schedule[shift_key] = selected
                 if date_str not in st.session_state.assigned_today:
                     st.session_state.assigned_today[date_str] = set()
@@ -652,7 +652,7 @@ def show_assignment_dialog(shift_key, date_str, station, shift_type, req_df, bal
                 st.success(f"✅ {selected} שובץ/ה!")
                 st.rerun()
         with col2:
-            if st.button("❌ ביטול", use_container_width=True):
+            if st.button("❌ ביטול", width="stretch"):
                 st.rerun()
 
 # Session State
@@ -710,12 +710,12 @@ with st.sidebar:
     st.divider()
     
     if req_file and shi_file:
-        if st.button("🪄 שיבוץ אוטומטי", type="primary", use_container_width=True):
+        if st.button("🪄 שיבוץ אוטומטי", type="primary", width="stretch"):
             st.session_state.trigger_auto = True
             st.rerun()
     
     if st.session_state.final_schedule:
-        if st.button("💾 שמור ל-Database", type="primary", use_container_width=True):
+        if st.button("💾 שמור ל-Database", type="primary", width="stretch"):
             if not db:
                 st.error("❌ Database לא זמין")
             else:
@@ -764,7 +764,7 @@ with st.sidebar:
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("📥 ייצא משמרות", use_container_width=True):
+            if st.button("📥 ייצא משמרות", width="stretch"):
                 try:
                     with st.spinner('מייצא מ-Database...'):
                         # קרא את כל המשמרות
@@ -796,7 +796,7 @@ with st.sidebar:
                                 csv,
                                 f"db_shifts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                                 mime="text/csv",
-                                use_container_width=True
+                                width="stretch"
                             )
                             st.info(f"📊 {len(shifts_data)} משמרות ב-Database")
                         else:
@@ -806,7 +806,7 @@ with st.sidebar:
                     st.error(f"❌ שגיאה: {str(e)}")
         
         with col2:
-            if st.button("📥 ייצא עובדים", use_container_width=True):
+            if st.button("📥 ייצא עובדים", width="stretch"):
                 try:
                     with st.spinner('מייצא מ-Database...'):
                         # קרא את כל העובדים
@@ -831,20 +831,20 @@ with st.sidebar:
                                 csv,
                                 f"db_employees_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                                 mime="text/csv",
-                                use_container_width=True
+                                width="stretch"
                             )
                             st.info(f"👥 {len(employees_data)} עובדים ב-Database")
                             
                             # תצוגה מקדימה
                             with st.expander("👁️ תצוגה מקדימה"):
-                                st.dataframe(employees_df.head(10), use_container_width=True, hide_index=True)
+                                st.dataframe(employees_df.head(10), width="stretch", hide_index=True)
                         else:
                             st.warning("אין עובדים ב-Database")
                 
                 except Exception as e:
                     st.error(f"❌ שגיאה: {str(e)}")
     
-    if st.button("🧹 איפוס", use_container_width=True):
+    if st.button("🧹 איפוס", width="stretch"):
         st.session_state.clear()
         st.rerun()
     
@@ -1029,7 +1029,7 @@ if req_file and shi_file:
                     'תחנה מבוקשת': '',
                     'סוג תקן': shift_row['סוג תקן'] if shift_row is not None else '',
                     'שם עובד': '',
-                    'מאזן משמרות': '',
+                    'מאזן משמרות': 0,  # Changed from '' to 0
                     'סטטוס': 'מבוטל'
                 })
             
@@ -1037,6 +1037,10 @@ if req_file and shi_file:
             
             if all_export_data:
                 export_df = pd.DataFrame(all_export_data)
+                
+                # Convert balance column to numeric to avoid Arrow serialization issues
+                export_df['מאזן משמרות'] = pd.to_numeric(export_df['מאזן משמרות'], errors='coerce').fillna(0).astype(int)
+                
                 export_df['תאריך_sort'] = export_df['תאריך'].apply(parse_date_safe)
                 export_df = export_df.sort_values(['תאריך_sort', 'תחנה משובצת', 'משמרת'])
                 export_df = export_df.drop('תאריך_sort', axis=1)
@@ -1050,12 +1054,12 @@ if req_file and shi_file:
                         data=csv,
                         file_name=f"shibutz_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                         mime="text/csv",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary"
                     )
                 with col_preview:
                     with st.expander("👁️ תצוגה מקדימה"):
-                        st.dataframe(export_df.head(20), use_container_width=True, height=200)
+                        st.dataframe(export_df.head(20), width="stretch", height=200)
                         st.caption(f"📊 {len(export_data)} משובצות + {len(cancelled_data)} מבוטלות")
         
         st.markdown("---")
@@ -1159,7 +1163,7 @@ if req_file and shi_file:
                             </div>
                             ''', unsafe_allow_html=True)
                             
-                            if st.button("🔄", key=f"restore_{shift_key}", use_container_width=True):
+                            if st.button("🔄", key=f"restore_{shift_key}", width="stretch"):
                                 st.session_state.cancelled_shifts.remove(shift_key)
                                 st.rerun()
                         
@@ -1265,7 +1269,7 @@ if req_file and shi_file:
                     
                     st.dataframe(
                         missing_df,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         height=min(len(missing_df) * 35 + 38, 400)
                     )
@@ -1285,7 +1289,7 @@ if req_file and shi_file:
                         data=csv_missing,
                         file_name=f"missing_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                         mime="text/csv",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary"
                     )
                     
