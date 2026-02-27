@@ -372,10 +372,28 @@ def get_atan_column(df):
     return None
 
 def get_balance():
-    """חישוב מאזן משמרות"""
+    """חישוב מאזן משמרות - כולל Database אם קיים"""
     balance = {}
+    
+    # קרא מאזן מצטבר מ-Database אם זמין
+    if db:
+        try:
+            employees_ref = db.collection('employees')
+            docs = employees_ref.stream()
+            for doc in docs:
+                data = doc.to_dict()
+                employee_name = data.get('name', '')
+                total_shifts = data.get('total_shifts', 0)
+                if employee_name:
+                    balance[employee_name] = total_shifts
+            logger.info(f"✅ נטען מאזן מ-Database: {len(balance)} עובדים")
+        except Exception as e:
+            logger.warning(f"⚠️ לא הצלחתי לקרוא מ-Database: {e}")
+    
+    # הוסף משמרות מהסשן הנוכחי
     for emp in st.session_state.final_schedule.values():
         balance[emp] = balance.get(emp, 0) + 1
+    
     return balance
 
 def auto_assign(dates, shi_df, req_df, balance):
@@ -1044,6 +1062,12 @@ if req_file and shi_file:
         
         # שיבוץ אוטומטי
         if st.session_state.get('trigger_auto'):
+            # הצג מידע על מאזן מה-Database
+            if db and balance:
+                employees_with_history = [emp for emp in balance.keys() if balance[emp] > 0]
+                if employees_with_history:
+                    st.info(f"📊 נטען מאזן מ-Database: {len(employees_with_history)} עובדים עם היסטוריה")
+            
             with st.spinner('מבצע שיבוץ...'):
                 temp_schedule, temp_assigned = auto_assign(dates, shi_df, req_df, balance)
                 st.session_state.final_schedule, st.session_state.assigned_today = temp_schedule, temp_assigned
